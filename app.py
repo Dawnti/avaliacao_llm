@@ -65,7 +65,7 @@ def obter_planos_avaliados(avaliador):
     try:
         cliente = conectar_google_sheets()
         URL_DA_PLANILHA = st.secrets["planilha_url"]
-        planilha = cliente.open_by_url(URL_DA_PLANILHA).worksheet("Página1")
+        planilha = cliente.open_by_url(URL_DA_PLANILHA).worksheet("Resultados")
         
         # Pega todos os dados (lista de listas). A primeira lista é o cabeçalho.
         dados = planilha.get_all_values()
