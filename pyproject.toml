@@ -20,3 +20,6 @@ avaliacao-humana = "avaliacao_humana:main"
 [build-system]
 requires = ["uv_build"]
 build-backend = "uv_build"
+
+[tool.poetry]
+package-mode = false
