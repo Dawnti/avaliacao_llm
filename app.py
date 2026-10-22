@@ -193,7 +193,7 @@ if btn_enviar:
     
     # 2. Abre a planilha pelo link e seleciona a aba (Sheet1 ou Respostas)
     URL_DA_PLANILHA = st.secrets["planilha_url"]
-    planilha = cliente.open_by_url(URL_DA_PLANILHA).worksheet("Resultados1") 
+    planilha = cliente.open_by_url(URL_DA_PLANILHA).worksheet("Resultados") 
     
     # 3. Monta a linha com as respostas, convertendo números para string para evitar erros no gspread
     nova_linha = [
