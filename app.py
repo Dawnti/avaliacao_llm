@@ -13,10 +13,7 @@ os.makedirs("respostas", exist_ok=True)
 
 # --- Sistema de Usuários e Senhas ---
 # Para um ambiente real, senhas mais fortes são recomendadas.
-USUARIOS = {
-    "joao": "senha123",
-    "maria": "senha456"
-}
+USUARIOS = st.secrets["usuarios"]
 
 # Inicializa o estado de login
 if "autenticado" not in st.session_state:
