@@ -8,16 +8,15 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "google-auth>=2.62.0",
-    "gspread>=6.2.1",
-    "label-studio>=1.23.2",
-    "pandas>=2.3.3",
-    "streamlit>=1.66.0",
+    "google-auth",
+    "gspread",
+    "pandas",
+    "streamlit",
 ]
 
 [project.scripts]
 avaliacao-humana = "avaliacao_humana:main"
 
 [build-system]
-requires = ["uv_build>=0.13.3,<0.14.0"]
+requires = ["uv_build"]
 build-backend = "uv_build"
