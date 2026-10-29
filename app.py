@@ -1,21 +1,16 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
-import os
+import random
 import gspread
 from google.oauth2.service_account import Credentials
 
 # --- Configurações Iniciais ---
-st.set_page_config(page_title="Avaliação de Planos de Cuidado", layout="centered")
-
-# Cria pastas necessárias caso não existam
-os.makedirs("dados", exist_ok=True)
-os.makedirs("respostas", exist_ok=True)
+st.set_page_config(page_title="Avaliação Comparativa de Planos", layout="centered")
 
 # --- Sistema de Usuários e Senhas ---
-# Para um ambiente real, senhas mais fortes são recomendadas.
 USUARIOS = st.secrets["usuarios"]
 
-# Inicializa o estado de login
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
     st.session_state.usuario_logado = None
@@ -38,11 +33,10 @@ if not st.session_state.autenticado:
             else:
                 st.error("Usuário ou senha incorretos.")
     
-    # Interrompe a execução do resto do código se não estiver logado
     st.stop()
 
 # ==========================================
-# A PARTIR DAQUI, O USUÁRIO ESTÁ AUTENTICADO
+# USUÁRIO AUTENTICADO
 # ==========================================
 avaliador = st.session_state.usuario_logado
 
@@ -60,77 +54,112 @@ def conectar_google_sheets():
     )
     return gspread.authorize(credenciais)
 
-def obter_planos_avaliados(avaliador):
-    """Busca na planilha quais IDs de plano este avaliador já preencheu."""
+def obter_pacientes_avaliados(avaliador):
+    """Busca na aba 'Resultados' quais pacientes este avaliador já concluiu."""
     try:
         cliente = conectar_google_sheets()
         URL_DA_PLANILHA = st.secrets["planilha_url"]
-        planilha = cliente.open_by_url(URL_DA_PLANILHA).worksheet("Resultados")
         
-        # Pega todos os dados (lista de listas). A primeira lista é o cabeçalho.
-        dados = planilha.get_all_values()
-        
-        if len(dados) <= 1: # Só tem o cabeçalho ou está vazia
+        # Tenta abrir a aba Resultados (cria o cabeçalho se a aba estiver vazia)
+        sheet = cliente.open_by_url(URL_DA_PLANILHA)
+        try:
+            planilha_res = sheet.worksheet("Resultados")
+        except gspread.exceptions.WorksheetNotFound:
+            planilha_res = sheet.add_worksheet(title="Resultados", rows="1000", cols="25")
+            planilha_res.append_row([
+                "Avaliador", "Paciente", "Plano_A_Tipo", "Plano_B_Tipo",
+                "A_q1", "A_q2", "A_q3", "A_q4", "A_q5", "A_q6", "A_q7", "A_q8",
+                "B_q1", "B_q2", "B_q3", "B_q4", "B_q5", "B_q6", "B_q7", "B_q8",
+                "Preferencia_Final"
+            ])
+            return []
+
+        dados = planilha_res.get_all_values()
+        if len(dados) <= 1:
             return []
             
-        planos_avaliados = []
-        # O cabeçalho está na linha 0. Os dados começam na linha 1.
+        pacientes_avaliados = []
         for linha in dados[1:]: 
-            # Verifica se a linha tem colunas suficientes e se o avaliador (Coluna A, índice 0) bate
             if len(linha) > 1 and linha[0] == avaliador:
-                try:
-                     # O ID_Plano deve estar na Coluna B (índice 1)
-                    planos_avaliados.append(int(linha[1]))
-                except ValueError:
-                    # Ignora se o ID na planilha não for um número válido
-                    pass
-        return planos_avaliados
+                # O nome/código do Paciente fica na Coluna B (índice 1)
+                pacientes_avaliados.append(str(linha[1]))
+        return pacientes_avaliados
     except Exception as e:
         st.error(f"Erro ao buscar histórico no Google Sheets: {e}")
         return []
 
-# --- Carregamento de Dados ---
-@st.cache_data
-def carregar_planos():
-    caminho_arquivo = "dados/planos.csv"
-    if os.path.exists(caminho_arquivo):
-        return pd.read_csv(caminho_arquivo)
-    else:
-        st.error("Arquivo dados/planos.csv não encontrado. Crie o arquivo com os dados.")
+@st.cache_data(ttl=300)
+def carregar_planos_sheets():
+    """Carrega os dados diretamente da aba 'PlanosCuidado' do Google Sheets."""
+    try:
+        cliente = conectar_google_sheets()
+        URL_DA_PLANILHA = st.secrets["planilha_url"]
+        planilha = cliente.open_by_url(URL_DA_PLANILHA).worksheet("PlanosCuidado")
+        dados = planilha.get_all_records()
+        df = pd.DataFrame(dados)
+        
+        # Converte a coluna de paciente para string para garantir filtros corretos
+        if 'paciente' in df.columns:
+            df['paciente'] = df['paciente'].astype(str)
+            
+        return df
+    except Exception as e:
+        st.error(f"Erro ao carregar a aba 'PlanosCuidado': {e}")
         st.stop()
 
-df_planos = carregar_planos()
+# --- Carregamento e Filtragem ---
+df_planos = carregar_planos_sheets()
 
-if 'avaliador_responsavel' not in df_planos.columns:
-    st.error("O arquivo CSV precisa ter uma coluna chamada 'avaliador_responsavel'.")
-    st.stop()
+# Validação do formato das colunas
+colunas_necessarias = ['paciente', 'plano_auto', 'plano_humano', 'avaliador']
+for col in colunas_necessarias:
+    if col not in df_planos.columns:
+        st.error(f"A aba 'PlanosCuidado' precisa conter a coluna '{col}'. Colunas encontradas: {list(df_planos.columns)}")
+        st.stop()
 
-# 1. Filtra para mostrar apenas os planos alocados para este usuário
-df_planos_usuario = df_planos[df_planos['avaliador_responsavel'] == avaliador]
+# 1. Filtra os pacientes alocados para o avaliador logado
+df_planos_usuario = df_planos[df_planos['avaliador'] == avaliador]
 
-# 2. Busca no Google Sheets o que ele já fez
-planos_ja_feitos = obter_planos_avaliados(avaliador)
+# 2. Verifica quais o avaliador já concluiu
+pacientes_ja_feitos = obter_pacientes_avaliados(avaliador)
 
-# 3. Filtra novamente: remove do DataFrame os planos que estão na lista de já feitos
-# O símbolo ~ inverte a condição (mantém os que NÃO estão na lista)
-df_pendentes = df_planos_usuario[~df_planos_usuario['id_plano'].isin(planos_ja_feitos)]
+# 3. Mantém apenas os pacientes pendentes
+df_pendentes = df_planos_usuario[~df_planos_usuario['paciente'].isin(pacientes_ja_feitos)]
 
-total_planos = len(df_pendentes)
+total_original = len(df_planos_usuario)
+quantidade_feita = len(pacientes_ja_feitos)
 
-if total_planos == 0:
-    st.success(f"🎉 Fantástico, {avaliador.capitalize()}! Você já avaliou todos os planos designados para você.")
+if len(df_pendentes) == 0:
+    st.success(f"🎉 Fantástico, {avaliador.capitalize()}! Você já avaliou todos os pacientes designados para você.")
     if st.button("Sair da conta"):
         st.session_state.autenticado = False
         st.rerun()
     st.stop()
 
-# --- Estado da Sessão (Paginação) ---
-# Como agora filtramos os pendentes toda vez que a página carrega, o índice 
-# pode sempre ser 0. O plano atual será sempre o primeiro da lista de pendentes.
-indice = 0 
-plano_atual = df_pendentes.iloc[indice]
+# Paciente atual
+paciente_atual = df_pendentes.iloc[0]
+id_paciente = str(paciente_atual["paciente"])
 
-# --- Cabeçalho e Progresso ---
+# --- Lógica de Sorteio de Ordem A/B (Randomização Cega) ---
+# Mantém a mesma ordem aleatória durante o preenchimento do mesmo paciente no session_state
+chave_ordem = f"ordem_{id_paciente}"
+if chave_ordem not in st.session_state:
+    opcoes = [
+        ("humano", paciente_atual["plano_humano"], "auto", paciente_atual["plano_auto"]),
+        ("auto", paciente_atual["plano_auto"], "humano", paciente_atual["plano_humano"])
+    ]
+    st.session_state[chave_ordem] = random.choice(opcoes)
+
+tipo_a, texto_a, tipo_b, texto_b = st.session_state[chave_ordem]
+
+# --- Interface e Scroll ---
+if st.session_state.get("rolar_topo", False):
+    components.html(
+        "<script>window.parent.document.querySelector('.main').scrollTop = 0;</script>",
+        height=0
+    )
+    st.session_state.rolar_topo = False
+
 col1, col2 = st.columns([8, 2])
 with col1:
     st.title(f"Avaliação - {avaliador.capitalize()}")
@@ -139,74 +168,132 @@ with col2:
         st.session_state.autenticado = False
         st.rerun()
 
-# Progresso: Quantos ele já fez vs o Total que ele tinha para fazer
-total_original_do_usuario = len(df_planos_usuario)
-quantidade_feita = len(planos_ja_feitos)
-st.progress(quantidade_feita / total_original_do_usuario, text=f"Progresso: {quantidade_feita} de {total_original_do_usuario} concluídos.")
+st.progress(
+    quantidade_feita / total_original if total_original > 0 else 1.0, 
+    text=f"Progresso: {quantidade_feita} de {total_original} pacientes concluídos."
+)
 st.divider()
 
-# --- Exibição do Texto ---
-st.subheader("Considere o seguinte paciente e plano de cuidado:")
-st.info(plano_atual["texto_plano"])
-st.divider()
+st.header(f"📋 Paciente ID: {id_paciente}")
+st.write("Abaixo você encontrará dois planos de cuidado elaborados para este paciente. Avalie cada plano individualmente e, ao final, indique a sua preferência.")
 
-# --- Formulário de Avaliação ---
-with st.form(key=f"form_{plano_atual['id_plano']}"):
+opcoes_likert = [
+    "1 - Discordo Totalmente", 
+    "2 - Discordo", 
+    "3 - Neutro", 
+    "4 - Concordo", 
+    "5 - Concordo Totalmente"
+]
+
+# --- Formulário Principal ---
+with st.form(key=f"form_paciente_{id_paciente}"):
     
-    st.subheader("Parte 1: Avalie as afirmações")
-    st.write("Levando em conta o quanto você concorda com elas:")
+    # ==========================================
+    # PLANO A
+    # ==========================================
+    st.markdown("### 🔹 PLANO A")
+    st.info(texto_a)
     
-    opcoes_likert = [
-        "1 - Discordo Totalmente", 
-        "2 - Discordo", 
-        "3 - Neutro", 
-        "4 - Concordo", 
-        "5 - Concordo Totalmente"
-    ]
+    st.markdown("**Parte 1: Avalie o Plano A**")
+    a_q1 = st.radio("1. O Plano A contém uma grande quantidade de erros", opcoes_likert, index=None, key=f"a_q1_{id_paciente}")
+    a_q2 = st.radio("2. Fatores de risco importantes foram deixados de fora no Plano A", opcoes_likert, index=None, key=f"a_q2_{id_paciente}")
+    a_q3 = st.radio("3. O Plano A está conciso e preciso", opcoes_likert, index=None, key=f"a_q3_{id_paciente}")
+    a_q4 = st.radio("4. A redação do Plano A foi escrita de forma clara e fácil de entender", opcoes_likert, index=None, key=f"a_q4_{id_paciente}")
     
-    q1 = st.radio("1. O plano contém uma grande quantidade de erros", opcoes_likert, index=2)
-    q2 = st.radio("2. Fatores de risco importantes foram deixados de fora", opcoes_likert, index=2)
-    q3 = st.radio("3. O plano está conciso e preciso", opcoes_likert, index=2)
-    q4 = st.radio("4. A redação do texto foi escrita de forma clara e fácil de entender", opcoes_likert, index=2)
-    
-    st.write("---")
-    q5 = st.select_slider(
-        "5. Quão confiante você está de que esse plano foi escrito por um humano?", 
+    a_q5 = st.select_slider(
+        "5. Quão confiante você está de que o Plano A foi escrito por um humano?", 
         options=["Nada Confiante", "Pouco Confiante", "Neutro", "Confiante", "Totalmente Confiante"], 
-        value="Neutro"
+        value="Neutro",
+        key=f"a_q5_{id_paciente}"
     )
 
-    st.subheader("Parte 2: Detalhamento")
-    q6 = st.number_input("1. Quantos erros foram cometidos?", min_value=0, max_value=100, value=0, step=1)
-    q7 = st.text_area("2. Quais foram os principais erros cometidos?")
-    q8 = st.text_area("3. O que você mudaria nesse plano de cuidado?")
+    st.markdown("**Parte 2: Detalhamento do Plano A**")
+    a_q6 = st.number_input("1. Quantos erros foram cometidos no Plano A?", min_value=0, max_value=100, value=None, step=1, placeholder="Digite um número...", key=f"a_q6_{id_paciente}")
+    a_q7 = st.text_area("2. Quais foram os principais erros cometidos no Plano A?", placeholder="Descreva aqui...", key=f"a_q7_{id_paciente}")
+    a_q8 = st.text_area("3. O que você mudaria no Plano A?", placeholder="Descreva aqui...", key=f"a_q8_{id_paciente}")
 
     st.divider()
+
+    # ==========================================
+    # PLANO B
+    # ==========================================
+    st.markdown("### 🔸 PLANO B")
+    st.info(texto_b)
     
-    # Botão de envio
+    st.markdown("**Parte 1: Avalie o Plano B**")
+    b_q1 = st.radio("1. O Plano B contém uma grande quantidade de erros", opcoes_likert, index=None, key=f"b_q1_{id_paciente}")
+    b_q2 = st.radio("2. Fatores de risco importantes foram deixados de fora no Plano B", opcoes_likert, index=None, key=f"b_q2_{id_paciente}")
+    b_q3 = st.radio("3. O Plano B está conciso e preciso", opcoes_likert, index=None, key=f"b_q3_{id_paciente}")
+    b_q4 = st.radio("4. A redação do Plano B foi escrita de forma clara e fácil de entender", opcoes_likert, index=None, key=f"b_q4_{id_paciente}")
+    
+    b_q5 = st.select_slider(
+        "5. Quão confiante você está de que o Plano B foi escrito por um humano?", 
+        options=["Nada Confiante", "Pouco Confiante", "Neutro", "Confiante", "Totalmente Confiante"], 
+        value="Neutro",
+        key=f"b_q5_{id_paciente}"
+    )
+
+    st.markdown("**Parte 2: Detalhamento do Plano B**")
+    b_q6 = st.number_input("1. Quantos erros foram cometidos no Plano B?", min_value=0, max_value=100, value=None, step=1, placeholder="Digite um número...", key=f"b_q6_{id_paciente}")
+    b_q7 = st.text_area("2. Quais foram os principais erros cometidos no Plano B?", placeholder="Descreva aqui...", key=f"b_q7_{id_paciente}")
+    b_q8 = st.text_area("3. O que você mudaria no Plano B?", placeholder="Descreva aqui...", key=f"b_q8_{id_paciente}")
+
+    st.divider()
+
+    # ==========================================
+    # PARTE COMPARATIVA
+    # ==========================================
+    st.subheader("🏆 Comparação Direta")
+    preferencia = st.radio(
+        "Qual dos dois planos você prefere no geral?",
+        ["Prefiro o Plano A", "Prefiro o Plano B", "Ambos são igualmente bons", "Ambos são igualmente ruins"],
+        index=None,
+        key=f"pref_{id_paciente}"
+    )
+
+    st.divider()
     btn_enviar = st.form_submit_button("Salvar e Próximo ➡️", type="primary")
 
-# --- Lógica de Salvamento e Navegação ---
+# --- Lógica de Validação e Salvamento ---
 if btn_enviar:
-    # 1. Obtém a conexão já cacheada
-    cliente = conectar_google_sheets()
+    # 1. Validações do Plano A
+    a_incompleto = None in [a_q1, a_q2, a_q3, a_q4] or a_q6 is None or not a_q7.strip() or not a_q8.strip()
     
-    # 2. Abre a planilha pelo link e seleciona a aba (Sheet1 ou Respostas)
-    URL_DA_PLANILHA = st.secrets["planilha_url"]
-    planilha = cliente.open_by_url(URL_DA_PLANILHA).worksheet("Resultados") 
+    # 2. Validações do Plano B
+    b_incompleto = None in [b_q1, b_q2, b_q3, b_q4] or b_q6 is None or not b_q7.strip() or not b_q8.strip()
     
-    # 3. Monta a linha com as respostas, convertendo números para string para evitar erros no gspread
-    nova_linha = [
-        avaliador,
-        str(plano_atual["id_plano"]),
-        q1, q2, q3, q4, q5, # Likert e Confiança
-        str(q6), q7, q8     # Detalhamentos
-    ]
-    
-    # 4. Envia a linha diretamente para o Google Sheets
-    planilha.append_row(nova_linha)
-    
-    # Ao invés de incrementar um índice, nós simplesmente recarregamos a página.
-    # Quando a página recarregar, a função 'obter_planos_avaliados' vai ler a planilha novamente,
-    # vai ver que este ID acabou de ser salvo, e vai removê-lo da lista de pendentes!
-    st.rerun()
+    # 3. Validação da Comparação
+    pref_incompleta = preferencia is None
+
+    if a_incompleto or b_incompleto or pref_incompleta:
+        st.error("⚠️ Por favor, preencha todos os campos do Plano A, do Plano B e a pergunta de preferência antes de salvar.")
+    else:
+        cliente = conectar_google_sheets()
+        URL_DA_PLANILHA = st.secrets["planilha_url"]
+        planilha_res = cliente.open_by_url(URL_DA_PLANILHA).worksheet("Resultados")
+        
+        # Monta a linha com todas as respostas + identificadores de qual era qual
+        nova_linha = [
+            avaliador,
+            id_paciente,
+            tipo_a,  # Indica se o Plano A era "humano" ou "auto"
+            tipo_b,  # Indica se o Plano B era "humano" ou "auto"
+            
+            # Respostas Plano A
+            a_q1, a_q2, a_q3, a_q4, a_q5, str(int(a_q6)), a_q7.strip(), a_q8.strip(),
+            
+            # Respostas Plano B
+            b_q1, b_q2, b_q3, b_q4, b_q5, str(int(b_q6)), b_q7.strip(), b_q8.strip(),
+            
+            # Preferência
+            preferencia
+        ]
+        
+        planilha_res.append_row(nova_linha)
+        
+        # Limpa o estado da ordem sorteada para este paciente
+        if chave_ordem in st.session_state:
+            del st.session_state[chave_ordem]
+            
+        st.session_state.rolar_topo = True
+        st.rerun()
