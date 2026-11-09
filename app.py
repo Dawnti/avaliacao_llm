@@ -60,7 +60,6 @@ def obter_pacientes_avaliados(avaliador):
         cliente = conectar_google_sheets()
         URL_DA_PLANILHA = st.secrets["planilha_url"]
         
-        # Tenta abrir a aba Resultados (cria o cabeçalho se a aba estiver vazia)
         sheet = cliente.open_by_url(URL_DA_PLANILHA)
         try:
             planilha_res = sheet.worksheet("Resultados")
@@ -68,8 +67,8 @@ def obter_pacientes_avaliados(avaliador):
             planilha_res = sheet.add_worksheet(title="Resultados", rows="1000", cols="25")
             planilha_res.append_row([
                 "Avaliador", "Paciente", "Plano_A_Tipo", "Plano_B_Tipo",
-                "A_q1", "A_q2", "A_q3", "A_q4", "A_q5", "A_q6", "A_q7", "A_q8",
-                "B_q1", "B_q2", "B_q3", "B_q4", "B_q5", "B_q6", "B_q7", "B_q8",
+                "A_q2", "A_q3", "A_q4", "A_q5", "A_q6", "A_q7", "A_q8",
+                "B_q2", "B_q3", "B_q4", "B_q5", "B_q6", "B_q7", "B_q8",
                 "Preferencia_Final"
             ])
             return []
@@ -81,7 +80,6 @@ def obter_pacientes_avaliados(avaliador):
         pacientes_avaliados = []
         for linha in dados[1:]: 
             if len(linha) > 1 and linha[0] == avaliador:
-                # O nome/código do Paciente fica na Coluna B (índice 1)
                 pacientes_avaliados.append(str(linha[1]))
         return pacientes_avaliados
     except Exception as e:
@@ -98,7 +96,6 @@ def carregar_planos_sheets():
         dados = planilha.get_all_records()
         df = pd.DataFrame(dados)
         
-        # Converte a coluna de paciente para string para garantir filtros corretos
         if 'paciente' in df.columns:
             df['paciente'] = df['paciente'].astype(str)
             
@@ -107,23 +104,37 @@ def carregar_planos_sheets():
         st.error(f"Erro ao carregar a aba 'PlanosCuidado': {e}")
         st.stop()
 
+def formatar_texto(texto):
+    """Trata caracteres de escape e ajusta para a renderização em Markdown do Streamlit."""
+    if not isinstance(texto, str):
+        texto = str(texto)
+        
+    # 1. Padroniza quebras de linha do Windows (\r\n) para \n
+    texto = texto.replace('\r\n', '\n')
+    
+    # 2. Caso o Sheets tenha enviado a string escapada literalmente ('\' + 'n')
+    texto = texto.replace('\\n', '\n').replace('\\t', '\t')
+    
+    # 3. O SEGREDO DO STREAMLIT: 
+    # Adiciona dois espaços antes do \n para forçar a quebra de linha no Markdown
+    texto = texto.replace('\n', '  \n')
+    
+    # 4. Substitui tabulações por um espaçamento horizontal equivalente em HTML
+    texto = texto.replace('\t', '&emsp;&emsp;')
+    
+    return texto
+
 # --- Carregamento e Filtragem ---
 df_planos = carregar_planos_sheets()
 
-# Validação do formato das colunas
-colunas_necessarias = ['paciente', 'plano_auto', 'plano_humano', 'avaliador']
+colunas_necessarias = ['paciente', 'plano_auto', 'plano_humano', 'avaliador', 'fatores']
 for col in colunas_necessarias:
     if col not in df_planos.columns:
         st.error(f"A aba 'PlanosCuidado' precisa conter a coluna '{col}'. Colunas encontradas: {list(df_planos.columns)}")
         st.stop()
 
-# 1. Filtra os pacientes alocados para o avaliador logado
 df_planos_usuario = df_planos[df_planos['avaliador'] == avaliador]
-
-# 2. Verifica quais o avaliador já concluiu
 pacientes_ja_feitos = obter_pacientes_avaliados(avaliador)
-
-# 3. Mantém apenas os pacientes pendentes
 df_pendentes = df_planos_usuario[~df_planos_usuario['paciente'].isin(pacientes_ja_feitos)]
 
 total_original = len(df_planos_usuario)
@@ -136,17 +147,17 @@ if len(df_pendentes) == 0:
         st.rerun()
     st.stop()
 
-# Paciente atual
+# Paciente atual e textos formatados
 paciente_atual = df_pendentes.iloc[0]
 id_paciente = str(paciente_atual["paciente"])
+fatores_paciente = formatar_texto(paciente_atual["fatores"])
 
-# --- Lógica de Sorteio de Ordem A/B (Randomização Cega) ---
-# Mantém a mesma ordem aleatória durante o preenchimento do mesmo paciente no session_state
+# --- Lógica de Sorteio de Ordem A/B ---
 chave_ordem = f"ordem_{id_paciente}"
 if chave_ordem not in st.session_state:
     opcoes = [
-        ("humano", paciente_atual["plano_humano"], "auto", paciente_atual["plano_auto"]),
-        ("auto", paciente_atual["plano_auto"], "humano", paciente_atual["plano_humano"])
+        ("humano", formatar_texto(paciente_atual["plano_humano"]), "auto", formatar_texto(paciente_atual["plano_auto"])),
+        ("auto", formatar_texto(paciente_atual["plano_auto"]), "humano", formatar_texto(paciente_atual["plano_humano"]))
     ]
     st.session_state[chave_ordem] = random.choice(opcoes)
 
@@ -175,7 +186,10 @@ st.progress(
 st.divider()
 
 st.header(f"📋 Paciente ID: {id_paciente}")
-st.write("Abaixo você encontrará dois planos de cuidado elaborados para este paciente. Avalie cada plano individualmente e, ao final, indique a sua preferência.")
+
+st.subheader("🩺 Avaliações do Paciente (Fatores)")
+st.info(fatores_paciente)
+st.write("Abaixo você encontrará dois planos de cuidado elaborados para este paciente com base nos fatores acima. Avalie cada plano individualmente e, ao final, indique a sua preferência.")
 
 opcoes_likert = [
     "1 - Discordo Totalmente", 
@@ -183,6 +197,14 @@ opcoes_likert = [
     "3 - Neutro", 
     "4 - Concordo", 
     "5 - Concordo Totalmente"
+]
+
+opcoes_erros = [
+    "Nenhum erro",
+    "Erros mínimos / pontuais",
+    "Quantidade moderada de erros",
+    "Muitos erros",
+    "Quantidade crítica de erros"
 ]
 
 # --- Formulário Principal ---
@@ -195,20 +217,24 @@ with st.form(key=f"form_paciente_{id_paciente}"):
     st.info(texto_a)
     
     st.markdown("**Parte 1: Avalie o Plano A**")
-    a_q1 = st.radio("1. O Plano A contém uma grande quantidade de erros", opcoes_likert, index=None, key=f"a_q1_{id_paciente}")
-    a_q2 = st.radio("2. Fatores de risco importantes foram deixados de fora no Plano A", opcoes_likert, index=None, key=f"a_q2_{id_paciente}")
-    a_q3 = st.radio("3. O Plano A está conciso e preciso", opcoes_likert, index=None, key=f"a_q3_{id_paciente}")
-    a_q4 = st.radio("4. A redação do Plano A foi escrita de forma clara e fácil de entender", opcoes_likert, index=None, key=f"a_q4_{id_paciente}")
+    a_q2 = st.radio("1. Fatores de risco importantes foram deixados de fora no Plano A", opcoes_likert, index=None, key=f"a_q2_{id_paciente}")
+    a_q3 = st.radio("2. O Plano A está conciso e preciso", opcoes_likert, index=None, key=f"a_q3_{id_paciente}")
+    a_q4 = st.radio("3. A redação do Plano A foi escrita de forma clara e fácil de entender", opcoes_likert, index=None, key=f"a_q4_{id_paciente}")
     
     a_q5 = st.select_slider(
-        "5. Quão confiante você está de que o Plano A foi escrito por um humano?", 
+        "4. Quão confiante você está de que o Plano A foi escrito por um humano?", 
         options=["Nada Confiante", "Pouco Confiante", "Neutro", "Confiante", "Totalmente Confiante"], 
         value="Neutro",
         key=f"a_q5_{id_paciente}"
     )
 
     st.markdown("**Parte 2: Detalhamento do Plano A**")
-    a_q6 = st.number_input("1. Quantos erros foram cometidos no Plano A?", min_value=0, max_value=100, value=None, step=1, placeholder="Digite um número...", key=f"a_q6_{id_paciente}")
+    a_q6 = st.select_slider(
+        "1. Qual a quantidade/gravidade dos erros cometidos no Plano A?",
+        options=opcoes_erros,
+        value="Nenhum erro",
+        key=f"a_q6_{id_paciente}"
+    )
     a_q7 = st.text_area("2. Quais foram os principais erros cometidos no Plano A?", placeholder="Descreva aqui...", key=f"a_q7_{id_paciente}")
     a_q8 = st.text_area("3. O que você mudaria no Plano A?", placeholder="Descreva aqui...", key=f"a_q8_{id_paciente}")
 
@@ -221,20 +247,24 @@ with st.form(key=f"form_paciente_{id_paciente}"):
     st.info(texto_b)
     
     st.markdown("**Parte 1: Avalie o Plano B**")
-    b_q1 = st.radio("1. O Plano B contém uma grande quantidade de erros", opcoes_likert, index=None, key=f"b_q1_{id_paciente}")
-    b_q2 = st.radio("2. Fatores de risco importantes foram deixados de fora no Plano B", opcoes_likert, index=None, key=f"b_q2_{id_paciente}")
-    b_q3 = st.radio("3. O Plano B está conciso e preciso", opcoes_likert, index=None, key=f"b_q3_{id_paciente}")
-    b_q4 = st.radio("4. A redação do Plano B foi escrita de forma clara e fácil de entender", opcoes_likert, index=None, key=f"b_q4_{id_paciente}")
+    b_q2 = st.radio("1. Fatores de risco importantes foram deixados de fora no Plano B", opcoes_likert, index=None, key=f"b_q2_{id_paciente}")
+    b_q3 = st.radio("2. O Plano B está conciso e preciso", opcoes_likert, index=None, key=f"b_q3_{id_paciente}")
+    b_q4 = st.radio("3. A redação do Plano B foi escrita de forma clara e fácil de entender", opcoes_likert, index=None, key=f"b_q4_{id_paciente}")
     
     b_q5 = st.select_slider(
-        "5. Quão confiante você está de que o Plano B foi escrito por um humano?", 
+        "4. Quão confiante você está de que o Plano B foi escrito por um humano?", 
         options=["Nada Confiante", "Pouco Confiante", "Neutro", "Confiante", "Totalmente Confiante"], 
         value="Neutro",
         key=f"b_q5_{id_paciente}"
     )
 
     st.markdown("**Parte 2: Detalhamento do Plano B**")
-    b_q6 = st.number_input("1. Quantos erros foram cometidos no Plano B?", min_value=0, max_value=100, value=None, step=1, placeholder="Digite um número...", key=f"b_q6_{id_paciente}")
+    b_q6 = st.select_slider(
+        "1. Qual a quantidade/gravidade dos erros cometidos no Plano B?",
+        options=opcoes_erros,
+        value="Nenhum erro",
+        key=f"b_q6_{id_paciente}"
+    )
     b_q7 = st.text_area("2. Quais foram os principais erros cometidos no Plano B?", placeholder="Descreva aqui...", key=f"b_q7_{id_paciente}")
     b_q8 = st.text_area("3. O que você mudaria no Plano B?", placeholder="Descreva aqui...", key=f"b_q8_{id_paciente}")
 
@@ -246,7 +276,7 @@ with st.form(key=f"form_paciente_{id_paciente}"):
     st.subheader("🏆 Comparação Direta")
     preferencia = st.radio(
         "Qual dos dois planos você prefere no geral?",
-        ["Prefiro o Plano A", "Prefiro o Plano B", "Ambos são igualmente bons", "Ambos são igualmente ruins"],
+        ["Prefiro o Plano A", "Prefiro o Plano B"],
         index=None,
         key=f"pref_{id_paciente}"
     )
@@ -256,13 +286,8 @@ with st.form(key=f"form_paciente_{id_paciente}"):
 
 # --- Lógica de Validação e Salvamento ---
 if btn_enviar:
-    # 1. Validações do Plano A
-    a_incompleto = None in [a_q1, a_q2, a_q3, a_q4] or a_q6 is None or not a_q7.strip() or not a_q8.strip()
-    
-    # 2. Validações do Plano B
-    b_incompleto = None in [b_q1, b_q2, b_q3, b_q4] or b_q6 is None or not b_q7.strip() or not b_q8.strip()
-    
-    # 3. Validação da Comparação
+    a_incompleto = None in [a_q2, a_q3, a_q4] or not a_q7.strip() or not a_q8.strip()
+    b_incompleto = None in [b_q2, b_q3, b_q4] or not b_q7.strip() or not b_q8.strip()
     pref_incompleta = preferencia is None
 
     if a_incompleto or b_incompleto or pref_incompleta:
@@ -272,18 +297,17 @@ if btn_enviar:
         URL_DA_PLANILHA = st.secrets["planilha_url"]
         planilha_res = cliente.open_by_url(URL_DA_PLANILHA).worksheet("Resultados")
         
-        # Monta a linha com todas as respostas + identificadores de qual era qual
         nova_linha = [
             avaliador,
             id_paciente,
-            tipo_a,  # Indica se o Plano A era "humano" ou "auto"
-            tipo_b,  # Indica se o Plano B era "humano" ou "auto"
+            tipo_a,
+            tipo_b,
             
             # Respostas Plano A
-            a_q1, a_q2, a_q3, a_q4, a_q5, str(int(a_q6)), a_q7.strip(), a_q8.strip(),
+            a_q2, a_q3, a_q4, a_q5, str(a_q6), a_q7.strip(), a_q8.strip(),
             
             # Respostas Plano B
-            b_q1, b_q2, b_q3, b_q4, b_q5, str(int(b_q6)), b_q7.strip(), b_q8.strip(),
+            b_q2, b_q3, b_q4, b_q5, str(b_q6), b_q7.strip(), b_q8.strip(),
             
             # Preferência
             preferencia
@@ -291,7 +315,6 @@ if btn_enviar:
         
         planilha_res.append_row(nova_linha)
         
-        # Limpa o estado da ordem sorteada para este paciente
         if chave_ordem in st.session_state:
             del st.session_state[chave_ordem]
             
