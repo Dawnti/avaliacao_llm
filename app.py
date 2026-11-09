@@ -185,9 +185,9 @@ st.progress(
 )
 st.divider()
 
-st.header(f"📋 Paciente ID: {id_paciente}")
+#st.header(f"📋 Paciente ID: {id_paciente}")
 
-st.subheader("🩺 Avaliações do Paciente (Fatores)")
+st.subheader("Avaliações do Paciente (Fatores)")
 st.info(fatores_paciente)
 st.write("Abaixo você encontrará dois planos de cuidado elaborados para este paciente com base nos fatores acima. Avalie cada plano individualmente e, ao final, indique a sua preferência.")
 
@@ -273,7 +273,7 @@ with st.form(key=f"form_paciente_{id_paciente}"):
     # ==========================================
     # PARTE COMPARATIVA
     # ==========================================
-    st.subheader("🏆 Comparação Direta")
+    st.subheader("Comparação Direta")
     preferencia = st.radio(
         "Qual dos dois planos você prefere no geral?",
         ["Prefiro o Plano A", "Prefiro o Plano B"],
