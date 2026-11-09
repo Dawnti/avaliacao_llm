@@ -1,9 +1,26 @@
+import time
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 import random
 import gspread
 from google.oauth2.service_account import Credentials
+
+# --- TESTE E SCROLL NO TOPO DA PÁGINA ---
+if st.session_state.get("rolar_topo", False):
+    
+    # Criamos uma âncora invisível dentro do iframe e mandamos O PRÓPRIO iframe
+    # pedir ao navegador principal para focar nele na tela.
+    js_burlar_cors = """
+    <div id="topo-invisivel"></div>
+    <script>
+        // Pede ao navegador para rolar a tela até que esta div (que está no topo) apareça
+        document.getElementById('topo-invisivel').scrollIntoView({behavior: 'smooth', block: 'start'});
+    </script>
+    """
+    components.html(js_burlar_cors, height=0)
+    
+    st.session_state.rolar_topo = False
 
 # --- Configurações Iniciais ---
 st.set_page_config(page_title="Avaliação Comparativa de Planos", layout="centered")
@@ -141,7 +158,7 @@ total_original = len(df_planos_usuario)
 quantidade_feita = len(pacientes_ja_feitos)
 
 if len(df_pendentes) == 0:
-    st.success(f"🎉 Fantástico, {avaliador.capitalize()}! Você já avaliou todos os pacientes designados para você.")
+    st.success(f"Todos os pacientes designados foram avaliados.")
     if st.button("Sair da conta"):
         st.session_state.autenticado = False
         st.rerun()
@@ -162,14 +179,6 @@ if chave_ordem not in st.session_state:
     st.session_state[chave_ordem] = random.choice(opcoes)
 
 tipo_a, texto_a, tipo_b, texto_b = st.session_state[chave_ordem]
-
-# --- Interface e Scroll ---
-if st.session_state.get("rolar_topo", False):
-    components.html(
-        "<script>window.parent.document.querySelector('.main').scrollTop = 0;</script>",
-        height=0
-    )
-    st.session_state.rolar_topo = False
 
 col1, col2 = st.columns([8, 2])
 with col1:
