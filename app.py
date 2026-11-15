@@ -141,6 +141,45 @@ def formatar_texto(texto):
     
     return texto
 
+def formatar_para_lista_markdown(texto):
+    """Lê os espaços do texto original (incluindo espaços inquebráveis) e converte para lista aninhada."""
+    if not isinstance(texto, str):
+        texto = str(texto)
+        
+    # Padroniza quebras de linha
+    texto = texto.replace('\r\n', '\n').replace('\\n', '\n')
+    
+    # O SEGREDO AQUI: Transforma espaços inquebráveis e tabs em espaços normais
+    texto = texto.replace('\xa0', ' ').replace('\t', '    ')
+    
+    linhas_formatadas = []
+    pilha_espacos = []  
+    
+    for linha in texto.split('\n'):
+        if not linha.strip():
+            linhas_formatadas.append("") 
+            continue
+            
+        # O lstrip() sem argumentos agora ignora e conta qualquer tipo de espaço em branco real
+        qtd_espacos = len(linha) - len(linha.lstrip())
+        
+        # 1. Volta níveis se a linha atual for menos recuada que a anterior
+        while pilha_espacos and pilha_espacos[-1] > qtd_espacos:
+            pilha_espacos.pop()
+            
+        # 2. Adiciona um novo nível se a linha for mais recuada
+        if not pilha_espacos or pilha_espacos[-1] < qtd_espacos:
+            pilha_espacos.append(qtd_espacos)
+            
+        nivel = len(pilha_espacos) - 1
+        
+        # Cria a indentação nativa do Markdown (4 espaços por subnível)
+        prefixo = ("    " * nivel) + "- "
+        
+        linhas_formatadas.append(prefixo + linha.strip())
+        
+    return "\n".join(linhas_formatadas)
+
 # --- Carregamento e Filtragem ---
 df_planos = carregar_planos_sheets()
 
@@ -167,7 +206,7 @@ if len(df_pendentes) == 0:
 # Paciente atual e textos formatados
 paciente_atual = df_pendentes.iloc[0]
 id_paciente = str(paciente_atual["paciente"])
-fatores_paciente = formatar_texto(paciente_atual["fatores"])
+fatores_paciente = formatar_para_lista_markdown(paciente_atual["fatores"])
 
 # --- Lógica de Sorteio de Ordem A/B ---
 chave_ordem = f"ordem_{id_paciente}"
@@ -196,8 +235,9 @@ st.divider()
 
 #st.header(f"📋 Paciente ID: {id_paciente}")
 
-st.subheader("Avaliações do Paciente (Fatores)")
-st.info(fatores_paciente)
+#st.subheader("Avaliações do Paciente (Fatores)")
+with st.expander("Fatores do paciente (clique para ocultar/expandir)", expanded=True):
+    st.markdown(fatores_paciente)
 st.write("Abaixo você encontrará dois planos de cuidado elaborados para este paciente com base nos fatores acima. Avalie cada plano individualmente e, ao final, indique a sua preferência.")
 
 opcoes_likert = [
@@ -223,7 +263,8 @@ with st.form(key=f"form_paciente_{id_paciente}"):
     # PLANO A
     # ==========================================
     st.markdown("### 🔹 PLANO A")
-    st.info(texto_a)
+    with st.container(border=True):
+        st.markdown(texto_a)
     
     st.markdown("**Parte 1: Avalie o Plano A**")
     a_q2 = st.radio("1. Fatores de risco importantes foram deixados de fora no Plano A", opcoes_likert, index=None, key=f"a_q2_{id_paciente}")
@@ -253,7 +294,8 @@ with st.form(key=f"form_paciente_{id_paciente}"):
     # PLANO B
     # ==========================================
     st.markdown("### 🔸 PLANO B")
-    st.info(texto_b)
+    with st.container(border=True):
+        st.markdown(texto_b)
     
     st.markdown("**Parte 1: Avalie o Plano B**")
     b_q2 = st.radio("1. Fatores de risco importantes foram deixados de fora no Plano B", opcoes_likert, index=None, key=f"b_q2_{id_paciente}")
